@@ -11,6 +11,12 @@
 /** @brief Número máximo de unidades cobráveis; acima disso, assistência. */
 #define TARIFF_MAX_UNITS 9999
 
+/** @brief Preço da primeira unidade iniciada, em centavos. */
+#define TARIFF_BASE_CENTAVOS 200
+
+/** @brief Preço de cada unidade iniciada depois da primeira, em centavos. */
+#define TARIFF_EXTRA_CENTAVOS 100
+
 /**
  * @brief Calcula a tarifa de uma permanência.
  *
