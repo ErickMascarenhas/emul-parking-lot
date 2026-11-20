@@ -83,7 +83,7 @@ static void stop(struct lane *l, int64_t now_ms, bool latched)
 {
 	bool pulse = l->state != LANE_ASSIST;
 
-	if (l->state == LANE_FAULT || (l->state == LANE_ASSIST && !latched)) {
+	if (l->state == LANE_FAULT) {
 		return;
 	}
 	if (drive(l, HW_OUT_MOTOR_ENABLE, false) < 0 || drive(l, HW_OUT_GREEN, false) < 0 ||
@@ -263,7 +263,7 @@ void lane_init(enum hw_lane lane, int64_t now_ms)
 {
 	struct lane *l = &lanes[lane];
 
-	l->id = lane;
+	*l = (struct lane){.id = lane};
 	line_init(&l->camera, true);
 	enter(l, LANE_BOOT, now_ms);
 }

@@ -148,3 +148,11 @@ ZTEST(line, test_expire_without_partial_frame_does_nothing)
 	zassert_equal(feed_str("OK\r\n", 5000), LINE_READY);
 	zassert_false(line_expire(&framer, 9000));
 }
+
+ZTEST(line, test_camera_bare_lf_is_dropped)
+{
+	line_init(&framer, true);
+
+	zassert_equal(feed_str("\n", 0), LINE_DROPPED);
+	zassert_equal(feed_str("OK\r\n", 0), LINE_READY);
+}

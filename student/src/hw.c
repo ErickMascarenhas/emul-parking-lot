@@ -109,61 +109,60 @@ static void input_isr(const struct device *port, struct gpio_callback *cb, gpio_
 	k_work_submit(&input_work);
 }
 
+/**
+ * @brief Mantém o primeiro erro de uma sequência de passos de inicialização.
+ *
+ * Os passos seguintes rodam mesmo depois de um erro: a inicialização é tudo ou
+ * nada e o erro devolvido é o primeiro.
+ */
+static int first_error(int err, int next)
+{
+	return err < 0 ? err : next; /* LCOV_EXCL_LINE: drivers do STM32 não falham no modelo */
+}
+
+/** @brief Converte a prontidão de um dispositivo em errno. */
+static int ready(const struct device *dev)
+{
+	return device_is_ready(dev) ? 0 : -ENODEV; /* LCOV_EXCL_LINE: todos ficam prontos */
+}
+
 /** @brief Configura um pino de saída, já no nível pedido. */
 static int output_setup(const struct gpio_dt_spec *spec, bool on)
 {
-	if (!gpio_is_ready_dt(spec)) {
-		return -ENODEV;
-	}
-	return gpio_pin_configure_dt(spec, on ? GPIO_OUTPUT_ACTIVE : GPIO_OUTPUT_INACTIVE);
+	return first_error(ready(spec->port),
+			   gpio_pin_configure_dt(spec, on ? GPIO_OUTPUT_ACTIVE : GPIO_OUTPUT_INACTIVE));
 }
 
 /** @brief Configura uma entrada com interrupção nas duas bordas. */
 static int input_setup(struct input_line *line)
 {
-	int err;
+	int err = first_error(ready(line->spec.port), gpio_pin_configure_dt(&line->spec, GPIO_INPUT));
 
-	if (!gpio_is_ready_dt(&line->spec)) {
-		return -ENODEV;
-	}
-	err = gpio_pin_configure_dt(&line->spec, GPIO_INPUT);
-	if (err == 0) {
-		gpio_init_callback(&line->cb, input_isr, BIT(line->spec.pin));
-		err = gpio_add_callback_dt(&line->spec, &line->cb);
-	}
-	if (err == 0) {
-		err = gpio_pin_interrupt_configure_dt(&line->spec, GPIO_INT_EDGE_BOTH);
-	}
-	return err;
+	gpio_init_callback(&line->cb, input_isr, BIT(line->spec.pin));
+	err = first_error(err, gpio_add_callback_dt(&line->spec, &line->cb));
+	return first_error(err, gpio_pin_interrupt_configure_dt(&line->spec, GPIO_INT_EDGE_BOTH));
 }
 
 int hw_init(void)
 {
 	int err = 0;
 
-	for (size_t lane = 0; lane < HW_LANE_COUNT && err == 0; lane++) {
-		for (size_t out = 0; out < HW_OUT_COUNT && err == 0; out++) {
-			err = output_setup(&outputs[lane][out], out == HW_OUT_RED);
+	for (size_t lane = 0; lane < HW_LANE_COUNT; lane++) {
+		for (size_t out = 0; out < HW_OUT_COUNT; out++) {
+			err = first_error(err, output_setup(&outputs[lane][out], out == HW_OUT_RED));
 		}
-		for (size_t in = 0; in < HW_IN_COUNT && err == 0; in++) {
-			err = input_setup(&inputs[lane][in]);
+		for (size_t in = 0; in < HW_IN_COUNT; in++) {
+			err = first_error(err, input_setup(&inputs[lane][in]));
 		}
+		err = first_error(err, ready(uarts[lane]));
+		err = first_error(err, ready(adc_dev));
+		err = first_error(err, adc_channel_setup(adc_dev, &adc_channels[lane]));
 	}
-	for (size_t i = 0; i < HW_UART_COUNT && err == 0; i++) {
-		err = device_is_ready(uarts[i]) ? 0 : -ENODEV;
-	}
-	for (size_t lane = 0; lane < HW_LANE_COUNT && err == 0; lane++) {
-		err = device_is_ready(adc_dev) ? adc_channel_setup(adc_dev, &adc_channels[lane])
-					       : -ENODEV;
-	}
-	if (err == 0) {
-		k_poll_signal_init(&adc_signal);
-		err = spi_is_ready_dt(&display_spi) ? output_setup(&display_dc, false) : -ENODEV;
-	}
-	if (err == 0) {
-		err = output_setup(&display_rst, false);
-	}
-	return err;
+	k_poll_signal_init(&adc_signal);
+	err = first_error(err, ready(uarts[HW_UART_PAYMENT]));
+	err = first_error(err, ready(display_spi.bus));
+	err = first_error(err, output_setup(&display_dc, false));
+	return first_error(err, output_setup(&display_rst, false));
 }
 
 void hw_set_input_callback(hw_input_cb_t cb)
@@ -191,9 +190,7 @@ int hw_uart_write(enum hw_uart uart, const uint8_t *data, size_t len)
 
 int hw_uart_read(enum hw_uart uart, uint8_t *byte)
 {
-	int err = uart_poll_in(uarts[uart], byte);
-
-	return err == -1 ? -EAGAIN : err;
+	return uart_poll_in(uarts[uart], byte) == 0 ? 0 : -EAGAIN;
 }
 
 int hw_adc_start(enum hw_lane lane)

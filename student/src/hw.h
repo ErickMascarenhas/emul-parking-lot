@@ -108,7 +108,7 @@ int hw_uart_write(enum hw_uart uart, const uint8_t *data, size_t len);
  *
  * @param uart UART de origem.
  * @param byte Recebe o byte.
- * @return 0 se havia byte, -EAGAIN se não havia ou errno negativo.
+ * @return 0 se havia byte ou -EAGAIN se não havia.
  */
 int hw_uart_read(enum hw_uart uart, uint8_t *byte);
 

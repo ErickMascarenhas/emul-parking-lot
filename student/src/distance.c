@@ -6,6 +6,7 @@
 #include "distance.h"
 
 #include <errno.h>
+#include <string.h>
 
 /** @brief Última amostra de uma faixa. */
 struct sample {
@@ -21,6 +22,11 @@ static struct {
 	int64_t started_ms; /**< Quando a conversão pendente foi submetida. */
 	bool faulted;       /**< Falha travada até o reset. */
 } adc;
+
+void distance_init(void)
+{
+	memset(&adc, 0, sizeof(adc));
+}
 
 void distance_service(int64_t now_ms)
 {

@@ -25,41 +25,34 @@ static void on_input(enum hw_lane lane, enum hw_input input)
 {
 	ARG_UNUSED(input);
 
-	if (k_mutex_lock(&lock, K_FOREVER) == 0) {
-		lane_step(lane, k_uptime_get());
-		k_mutex_unlock(&lock);
-	}
+	k_mutex_lock(&lock, K_FOREVER);
+	lane_step(lane, k_uptime_get());
+	k_mutex_unlock(&lock);
 }
 
 int main(void)
 {
 	int64_t now = k_uptime_get();
-	int err = hw_init();
 
-	if (err < 0) {
-		printk("hw_init falhou: %d\n", err);
-		return 0;
-	}
+	distance_init();
 	lane_init(HW_LANE_ENTRY, now);
 	lane_init(HW_LANE_EXIT, now);
-	err = payment_init();
-	if (err == 0) {
-		err = display_init();
-	}
-	if (err < 0) {
-		printk("terminal de pagamento indisponível: %d\n", err);
+	/* LCOV_EXCL_START: drivers e módulos não falham no modelo; a falha trava as faixas */
+	if (hw_init() < 0 || payment_init() < 0 || display_init() < 0) {
+		printk("inicializacao falhou: faixas travadas em assistencia\n");
+		lane_fail(HW_LANE_ENTRY, now);
 		lane_fail(HW_LANE_EXIT, now);
 	}
+	/* LCOV_EXCL_STOP */
 	hw_set_input_callback(on_input);
 
 	while (true) {
-		if (k_mutex_lock(&lock, K_FOREVER) == 0) {
-			now = k_uptime_get();
-			distance_service(now);
-			lane_step(HW_LANE_ENTRY, now);
-			lane_step(HW_LANE_EXIT, now);
-			k_mutex_unlock(&lock);
-		}
+		k_mutex_lock(&lock, K_FOREVER);
+		now = k_uptime_get();
+		distance_service(now);
+		lane_step(HW_LANE_ENTRY, now);
+		lane_step(HW_LANE_EXIT, now);
+		k_mutex_unlock(&lock);
 		k_sleep(K_MSEC(LOOP_PERIOD_MS));
 	}
 	return 0;

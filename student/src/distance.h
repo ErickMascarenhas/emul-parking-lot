@@ -32,6 +32,11 @@
 #define DISTANCE_MAX_CODE 4095
 
 /**
+ * @brief Esquece amostras e falhas; a próxima conversão é da entrada.
+ */
+void distance_init(void);
+
+/**
  * @brief Verifica a conversão pendente e, se ela terminou, inicia a da outra faixa.
  *
  * @param now_ms Tempo virtual atual.

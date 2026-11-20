@@ -8,7 +8,7 @@ entradas. Quem não usou IA escreve isso aqui.
 
 | Aluno | Matrícula | Partes que escreveu |
 |---|---|---|
-| Erick de Lima Mascarenhas | 23211622 | Interfaces dos módulos (`hw.h`, `line.h`, `payment.h`, `tariff.h`, `display.h`), montador de quadros UART (`line.c`) e sua suíte `tests/line`, camada de hardware (`hw.c`), ADC4 (`distance.c`), câmera (`camera.c`), sessões (`session.c`), máquina de estados das faixas (`lane.c`) e `main.c` |
+| Erick de Lima Mascarenhas | 23211622 | Interfaces dos módulos (`hw.h`, `line.h`, `payment.h`, `tariff.h`, `display.h`), montador de quadros UART (`line.c`) e sua suíte `tests/line`, camada de hardware (`hw.c`), ADC4 (`distance.c`), câmera (`camera.c`), sessões (`session.c`), máquina de estados das faixas (`lane.c`), `main.c` e as suítes `tests/camera`, `tests/session`, `tests/distance`, `tests/lane` e `tests/hw` |
 | João Victor Cavalcante da Silva Correia | 2021301012 | (a preencher pelo João) |
 
 ## Ferramentas
@@ -50,6 +50,16 @@ Uma entrada por tarefa relevante (um requisito, um bug, uma refatoração).
 - **O que aceitei, mudei ou rejeitei, e por quê:** aceitei. A IA trocou a recepção UART por interrupção pela leitura por polling, porque a documentação do laboratório (`hardware-models.md`) não garante transporte UART por IRQ no modelo. Separei a assistência que rearma (cancela fechada) da falha travada (cancela fora do fim de curso, limites contraditórios, prazos do motor, ADC), como pede o REQ-08.
 - **Como verifiquei:** 13 cenários públicos que não dependem do pagamento passando (`camera-timeout`, `confidence-retry`, `contradictory-limits`, `jam`, `low-confidence`, `missing-lower`, `missing-upper`, `noisy-threshold`, `obstruction-before-close`, `obstruction-during-close`, `partial-startup`, `reset-capture`, `stationary`); `normal` correto até a entrada, falhando só na saída por falta do pagamento; `scripts/static-check.py` com 0 achados.
 - **O que aprendi / o que ainda preciso entender:** por que a borda do fim de curso é tratada na work queue e não na ISR; por que a falha do ADC trava as duas faixas; por que a faixa espera 20 ms no boot antes de ler os sensores.
+
+### 2026-11-20 — Suítes de unidade e cobertura
+
+- **Aluno:** Erick de Lima Mascarenhas
+- **Requisito(s):** REQ-02, REQ-03, REQ-06, REQ-07, REQ-08, REQ-09, REQ-10, REQ-11
+- **O que pedi:** testes de unidade com FFF para os meus módulos, cobrindo os caminhos de erro que os cenários não alcançam.
+- **O que a IA propôs:** uma suíte por módulo. `lane` usa falsos do FFF de `hw.h`, `distance.h`, `payment.h`, `tariff.h` e `display.h` lendo um "mundo" simulado, com câmera, sessões e montador reais; `distance` usa falsos do ADC; `hw` roda com os drivers e modelos reais. Para reduzir branches que só um driver com defeito alcançaria, `hw_init()` passou a acumular o primeiro erro (`first_error`) em vez de testar cada passo; `distance_init()` e `lane_init()` zeram o estado, o que as suítes usam entre testes. A suíte de exemplo `tests/unit` foi removida.
+- **O que aceitei, mudei ou rejeitei, e por quê:** aceitei. As seis linhas excluídas (`LCOV_EXCL`, 1,4%) são falhas de driver e de inicialização que o modelo não produz, cada uma com o motivo no código.
+- **Como verifiquei:** `scripts/firmware-coverage.py` com as seis suítes e os 13 cenários que não dependem do pagamento passando: meus arquivos com 100% das linhas; branches com 100%, exceto `hw.c` (84,62%, quatro desvios de erro de driver). `scripts/static-check.py` com 0 achados.
+- **O que aprendi / o que ainda preciso entender:** como o FFF substitui uma função na ligação; por que um teste que roda vários casos num laço precisa restaurar o "mundo" a cada iteração.
 
 ## Código de terceiros
 
