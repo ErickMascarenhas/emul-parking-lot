@@ -8,7 +8,7 @@ entradas. Quem não usou IA escreve isso aqui.
 
 | Aluno | Matrícula | Partes que escreveu |
 |---|---|---|
-| Erick de Lima Mascarenhas | 23211622 | Interfaces dos módulos (`hw.h`, `line.h`, `payment.h`, `tariff.h`, `display.h`), montador de quadros UART (`line.c`) e sua suíte `tests/line` |
+| Erick de Lima Mascarenhas | 23211622 | Interfaces dos módulos (`hw.h`, `line.h`, `payment.h`, `tariff.h`, `display.h`), montador de quadros UART (`line.c`) e sua suíte `tests/line`, camada de hardware (`hw.c`), ADC4 (`distance.c`), câmera (`camera.c`), sessões (`session.c`), máquina de estados das faixas (`lane.c`) e `main.c` |
 | João Victor Cavalcante da Silva Correia | 2021301012 | (a preencher pelo João) |
 
 ## Ferramentas
@@ -40,6 +40,16 @@ Uma entrada por tarefa relevante (um requisito, um bug, uma refatoração).
 - **O que aceitei, mudei ou rejeitei, e por quê:** aceitei a divisão por módulo (não por faixa, como o desafio recomenda) e o montador como está.
 - **Como verifiquei:** suíte `tests/line` passando no Renode via `scripts/firmware-coverage.py`; `line.c` com 100% das linhas e 97,37% dos branches.
 - **O que aprendi / o que ainda preciso entender:** por que o CR só pode vir imediatamente antes do LF e por que o espaço do LF é reservado ao guardar cada byte.
+
+### 2026-11-20 — Camada de hardware, ADC4, câmera, sessões e máquina de estados
+
+- **Aluno:** Erick de Lima Mascarenhas
+- **Requisito(s):** REQ-01, REQ-02, REQ-03, REQ-06, REQ-07, REQ-08, REQ-09, REQ-10, REQ-13
+- **O que pedi:** implementar a parte do controlador que não depende do pagamento: drivers, ADC, câmera, sessões e as duas faixas, priorizando os cenários de segurança.
+- **O que a IA propôs:** `hw.c` como único ponto com drivers (GPIO/EXTI com a borda adiada para a work queue, ADC4 assíncrono, UART por polling, SPI do display); `distance.c` como dono único do ADC4, alternando os canais 17 e 18, com prazo de 100 ms e falha travada; `camera.c` com o pedido `AT+CAPTURE` e a validação do `+PLATE`; `session.c` com a tabela por placa; `lane.c` com uma máquina de estados para as duas faixas (BOOT, IDLE, IDENTIFYING, PAYING, OPENING, OPEN, PASSING, CLOSING, ASSIST, FAULT); `main.c` com laço de 1 ms e mutex compartilhado com a work queue.
+- **O que aceitei, mudei ou rejeitei, e por quê:** aceitei. A IA trocou a recepção UART por interrupção pela leitura por polling, porque a documentação do laboratório (`hardware-models.md`) não garante transporte UART por IRQ no modelo. Separei a assistência que rearma (cancela fechada) da falha travada (cancela fora do fim de curso, limites contraditórios, prazos do motor, ADC), como pede o REQ-08.
+- **Como verifiquei:** 13 cenários públicos que não dependem do pagamento passando (`camera-timeout`, `confidence-retry`, `contradictory-limits`, `jam`, `low-confidence`, `missing-lower`, `missing-upper`, `noisy-threshold`, `obstruction-before-close`, `obstruction-during-close`, `partial-startup`, `reset-capture`, `stationary`); `normal` correto até a entrada, falhando só na saída por falta do pagamento; `scripts/static-check.py` com 0 achados.
+- **O que aprendi / o que ainda preciso entender:** por que a borda do fim de curso é tratada na work queue e não na ISR; por que a falha do ADC trava as duas faixas; por que a faixa espera 20 ms no boot antes de ler os sensores.
 
 ## Código de terceiros
 

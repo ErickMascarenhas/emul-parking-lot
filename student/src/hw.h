@@ -103,26 +103,23 @@ int hw_uart_write(enum hw_uart uart, const uint8_t *data, size_t len);
 /**
  * @brief Retira um byte recebido, sem bloquear.
  *
- * Os bytes chegam por interrupção e ficam numa fila limitada por UART.
+ * A UART é lida por polling: o modelo do Renode guarda os bytes que chegam até
+ * o firmware lê-los.
  *
  * @param uart UART de origem.
  * @param byte Recebe o byte.
- * @return 0 se havia byte, -EAGAIN se a fila está vazia ou errno negativo.
+ * @return 0 se havia byte, -EAGAIN se não havia ou errno negativo.
  */
 int hw_uart_read(enum hw_uart uart, uint8_t *byte);
 
 /**
- * @brief Descarta tudo o que estiver nas filas de recepção.
- */
-void hw_uart_flush(void);
-
-/**
  * @brief Inicia uma conversão assíncrona do sensor de distância de uma faixa.
  *
- * Só pode haver uma conversão pendente por vez no ADC4.
+ * Só pode haver uma conversão pendente por vez no ADC4: o chamador só inicia
+ * outra depois que hw_adc_poll() informar o fim desta.
  *
  * @param lane Faixa cujo canal será convertido.
- * @return 0 em sucesso, -EBUSY se já há conversão pendente ou errno negativo.
+ * @return 0 em sucesso ou errno negativo.
  */
 int hw_adc_start(enum hw_lane lane);
 
