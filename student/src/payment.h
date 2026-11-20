@@ -23,6 +23,12 @@
 /** @brief Tamanho de um UUID textual (8-4-4-4-12), sem o NUL. */
 #define PAYMENT_UUID_LEN 36
 
+/** @brief Tamanho da placa, sem o NUL. */
+#define PAYMENT_PLATE_LEN 7
+
+/** @brief Maior valor aceito pelo terminal, em centavos. */
+#define PAYMENT_MAX_AMOUNT 1000000U
+
 /** @brief Desfecho de uma cobrança, devolvido por payment_poll(). */
 enum payment_event {
 	PAYMENT_EV_NONE = 0, /**< Nada novo: aguardando ou sem cobrança ativa. */
@@ -78,5 +84,21 @@ int payment_abort(void);
  * @return 1 se há, 0 se não.
  */
 int payment_active(void);
+
+/** @brief Contadores de diagnóstico, desde payment_init(). */
+struct payment_stats {
+	unsigned int dropped;         /**< Quadros descartados no LF (longos, com CR, inválidos). */
+	unsigned int expired;         /**< Quadros parciais que passaram do prazo de montagem. */
+	unsigned int cancel_failures; /**< CANCEL que a UART não enviou após esgotar os envios. */
+};
+
+/**
+ * @brief Copia os contadores de diagnóstico.
+ *
+ * Só observação: nenhum contador muda o andamento da cobrança.
+ *
+ * @param stats Recebe os contadores.
+ */
+void payment_stats_get(struct payment_stats *stats);
 
 #endif /* PAYMENT_H_ */
