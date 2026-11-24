@@ -183,11 +183,11 @@ ZTEST(payment, test_happy_path)
 	format(expected, sizeof(expected), "P1 CHARGE %s " PLATE " 400 BRL\n", uuid);
 	zassert_str_equal(w.tx[0], expected);
 
-	zassert_equal(payment_poll(T0 + 50), PAYMENT_EV_NONE, "nada chegou ainda");
+	zassert_equal(payment_poll(T0 + 50, true), PAYMENT_EV_NONE, "nada chegou ainda");
 	w.rx = result(reply, sizeof(reply), uuid, "PAID", "400");
-	zassert_equal(payment_poll(T0 + 100), PAYMENT_EV_PAID);
+	zassert_equal(payment_poll(T0 + 100, true), PAYMENT_EV_PAID);
 	zassert_equal(payment_active(), 0);
-	zassert_equal(payment_poll(T0 + 5000), PAYMENT_EV_NONE, "sem cobrança, sem prazo");
+	zassert_equal(payment_poll(T0 + 5000, true), PAYMENT_EV_NONE, "sem cobrança, sem prazo");
 	zassert_equal(w.tx_count, 1, "PAID não envia nada");
 }
 
@@ -234,11 +234,11 @@ ZTEST(payment, test_paid_in_fragments)
 	w.rx = result(reply, sizeof(reply), uuid, "PAID", "400");
 	while (strlen(w.rx) > 2) {
 		w.rx_budget = 2;
-		zassert_equal(payment_poll(now), PAYMENT_EV_NONE, "quadro ainda incompleto");
+		zassert_equal(payment_poll(now, true), PAYMENT_EV_NONE, "quadro ainda incompleto");
 		now += 10;
 	}
 	w.rx_budget = 2;
-	zassert_equal(payment_poll(now), PAYMENT_EV_PAID);
+	zassert_equal(payment_poll(now, true), PAYMENT_EV_PAID);
 }
 
 ZTEST(payment, test_resend_same_charge_at_most_three_times)
@@ -246,13 +246,13 @@ ZTEST(payment, test_resend_same_charge_at_most_three_times)
 	char uuid[PAYMENT_UUID_LEN + 1];
 
 	start(uuid);
-	zassert_equal(payment_poll(T0 + PAYMENT_TIMEOUT_MS - 1), PAYMENT_EV_NONE);
+	zassert_equal(payment_poll(T0 + PAYMENT_TIMEOUT_MS - 1, true), PAYMENT_EV_NONE);
 	zassert_equal(w.tx_count, 1, "ainda no prazo");
-	zassert_equal(payment_poll(T0 + PAYMENT_TIMEOUT_MS), PAYMENT_EV_NONE);
+	zassert_equal(payment_poll(T0 + PAYMENT_TIMEOUT_MS, true), PAYMENT_EV_NONE);
 	zassert_equal(w.tx_count, 2);
-	zassert_equal(payment_poll(T0 + 2 * PAYMENT_TIMEOUT_MS - 1), PAYMENT_EV_NONE);
+	zassert_equal(payment_poll(T0 + 2 * PAYMENT_TIMEOUT_MS - 1, true), PAYMENT_EV_NONE);
 	zassert_equal(w.tx_count, 2, "o prazo conta desde o último envio");
-	zassert_equal(payment_poll(T0 + 2 * PAYMENT_TIMEOUT_MS), PAYMENT_EV_NONE);
+	zassert_equal(payment_poll(T0 + 2 * PAYMENT_TIMEOUT_MS, true), PAYMENT_EV_NONE);
 	zassert_equal(w.tx_count, PAYMENT_MAX_SENDS);
 	for (unsigned int i = 1; i < PAYMENT_MAX_SENDS; i++) {
 		zassert_str_equal(w.tx[i], w.tx[0], "reenvio %u igual ao primeiro", i);
@@ -267,35 +267,36 @@ ZTEST(payment, test_timeout_after_three_sends_cancels)
 	struct payment_stats stats;
 
 	start(uuid);
-	zassert_equal(payment_poll(T0 + PAYMENT_TIMEOUT_MS), PAYMENT_EV_NONE);
-	zassert_equal(payment_poll(T0 + 2 * PAYMENT_TIMEOUT_MS), PAYMENT_EV_NONE);
-	zassert_equal(payment_poll(T0 + 3 * PAYMENT_TIMEOUT_MS), PAYMENT_EV_FAILED);
+	zassert_equal(payment_poll(T0 + PAYMENT_TIMEOUT_MS, true), PAYMENT_EV_NONE);
+	zassert_equal(payment_poll(T0 + 2 * PAYMENT_TIMEOUT_MS, true), PAYMENT_EV_NONE);
+	zassert_equal(payment_poll(T0 + 3 * PAYMENT_TIMEOUT_MS, true), PAYMENT_EV_FAILED);
 	zassert_equal(payment_active(), 0);
 	zassert_equal(w.tx_count, PAYMENT_MAX_SENDS + 1);
 	format(cancel, sizeof(cancel), "P1 CANCEL %s\n", uuid);
 	zassert_str_equal(w.tx[PAYMENT_MAX_SENDS], cancel);
 
 	w.rx = result(reply, sizeof(reply), uuid, "PAID", "400");
-	zassert_equal(payment_poll(T0 + 3 * PAYMENT_TIMEOUT_MS + 10), PAYMENT_EV_NONE,
+	zassert_equal(payment_poll(T0 + 3 * PAYMENT_TIMEOUT_MS + 10, true), PAYMENT_EV_NONE,
 		      "PAID depois de desistir não vale");
-	zassert_equal(payment_poll(T0 + 10 * PAYMENT_TIMEOUT_MS), PAYMENT_EV_NONE);
+	zassert_equal(payment_poll(T0 + 10 * PAYMENT_TIMEOUT_MS, true), PAYMENT_EV_NONE);
 	zassert_equal(w.tx_count, PAYMENT_MAX_SENDS + 1, "nada mais é enviado");
 	payment_stats_get(&stats);
 	zassert_equal(stats.cancel_failures, 0);
 }
 
-ZTEST(payment, test_cancelled_fails_without_cancel)
+ZTEST(payment, test_cancelled_invalidates_then_confirms_cancel)
 {
 	char uuid[PAYMENT_UUID_LEN + 1];
 	char reply[128];
 
 	start(uuid);
 	w.rx = result(reply, sizeof(reply), uuid, "CANCELLED", "400");
-	zassert_equal(payment_poll(T0 + 100), PAYMENT_EV_FAILED);
+	zassert_equal(payment_poll(T0 + 100, true), PAYMENT_EV_FAILED);
 	zassert_equal(payment_active(), 0);
-	zassert_equal(w.tx_count, 1, "o terminal já cancelou: nada a enviar");
+	zassert_equal(w.tx_count, 2);
+	zassert_ok(strncmp(w.tx[1], "P1 CANCEL ", 10));
 	zassert_ok(payment_abort(), "abort sem cobrança ativa não faz nada");
-	zassert_equal(w.tx_count, 1);
+	zassert_equal(w.tx_count, 2);
 }
 
 ZTEST(payment, test_stale_uuid_is_ignored)
@@ -311,10 +312,10 @@ ZTEST(payment, test_stale_uuid_is_ignored)
 	zassert_true(strcmp(uuid, old_uuid) != 0);
 
 	w.rx = result(reply, sizeof(reply), old_uuid, "PAID", "400");
-	zassert_equal(payment_poll(T0 + 100), PAYMENT_EV_NONE, "PAID do carro anterior");
+	zassert_equal(payment_poll(T0 + 100, true), PAYMENT_EV_NONE, "PAID do carro anterior");
 	zassert_equal(payment_active(), 1);
 	w.rx = result(reply, sizeof(reply), uuid, "PAID", "400");
-	zassert_equal(payment_poll(T0 + 200), PAYMENT_EV_PAID);
+	zassert_equal(payment_poll(T0 + 200, true), PAYMENT_EV_PAID);
 }
 
 ZTEST(payment, test_other_amount_is_ignored_and_keeps_deadline)
@@ -324,9 +325,9 @@ ZTEST(payment, test_other_amount_is_ignored_and_keeps_deadline)
 
 	start(uuid);
 	w.rx = result(reply, sizeof(reply), uuid, "PAID", "500");
-	zassert_equal(payment_poll(T0 + 500), PAYMENT_EV_NONE);
+	zassert_equal(payment_poll(T0 + 500, true), PAYMENT_EV_NONE);
 	zassert_equal(payment_active(), 1);
-	zassert_equal(payment_poll(T0 + PAYMENT_TIMEOUT_MS), PAYMENT_EV_NONE);
+	zassert_equal(payment_poll(T0 + PAYMENT_TIMEOUT_MS, true), PAYMENT_EV_NONE);
 	zassert_equal(w.tx_count, 2, "resposta errada não reinicia o prazo");
 }
 
@@ -357,7 +358,10 @@ ZTEST(payment, test_malformed_replies_are_ignored)
 
 	for (int i = 0; i < n; i++) {
 		w.rx = frames[i];
-		zassert_equal(payment_poll(T0 + 10 + i), PAYMENT_EV_NONE, "quadro %d autorizou", i);
+		while (*w.rx != '\0') {
+			zassert_equal(payment_poll(T0 + 10 + i, true), PAYMENT_EV_NONE,
+				      "quadro %d autorizou", i);
+		}
 		zassert_equal(payment_active(), 1);
 	}
 	payment_stats_get(&stats);
@@ -365,7 +369,7 @@ ZTEST(payment, test_malformed_replies_are_ignored)
 	zassert_equal(w.tx_count, 1, "nenhum quadro reinicia o prazo nem reenvia");
 
 	w.rx = result(reply, sizeof(reply), uuid, "PAID", "400");
-	zassert_equal(payment_poll(T0 + 900), PAYMENT_EV_PAID, "o próximo quadro válido vale");
+	zassert_equal(payment_poll(T0 + 900, true), PAYMENT_EV_PAID, "o próximo quadro válido vale");
 }
 
 ZTEST(payment, test_duplicate_paid_has_no_effect)
@@ -378,8 +382,8 @@ ZTEST(payment, test_duplicate_paid_has_no_effect)
 	result(reply, sizeof(reply), uuid, "PAID", "400");
 	format(twice, sizeof(twice), "%s%s", reply, reply);
 	w.rx = twice;
-	zassert_equal(payment_poll(T0 + 100), PAYMENT_EV_PAID);
-	zassert_equal(payment_poll(T0 + 110), PAYMENT_EV_NONE, "segundo PAID não conta");
+	zassert_equal(payment_poll(T0 + 100, true), PAYMENT_EV_PAID);
+	zassert_equal(payment_poll(T0 + 110, true), PAYMENT_EV_NONE, "segundo PAID não conta");
 	zassert_equal(*w.rx, '\0', "o duplicado foi lido e descartado");
 }
 
@@ -397,8 +401,8 @@ ZTEST(payment, test_abort_then_late_paid)
 	zassert_str_equal(w.tx[1], cancel);
 
 	w.rx = result(reply, sizeof(reply), uuid, "PAID", "400");
-	zassert_equal(payment_poll(T0 + 100), PAYMENT_EV_NONE, "PAID atrasado depois do abort");
-	zassert_equal(payment_poll(T0 + 5000), PAYMENT_EV_NONE);
+	zassert_equal(payment_poll(T0 + 100, true), PAYMENT_EV_NONE, "PAID atrasado depois do abort");
+	zassert_equal(payment_poll(T0 + 5000, true), PAYMENT_EV_NONE);
 	zassert_equal(w.tx_count, 2);
 }
 
@@ -407,7 +411,7 @@ ZTEST(payment, test_reply_without_charge_is_ignored)
 	char reply[128];
 
 	w.rx = result(reply, sizeof(reply), "00000000-0000-4000-8000-000000000001", "PAID", "400");
-	zassert_equal(payment_poll(T0), PAYMENT_EV_NONE);
+	zassert_equal(payment_poll(T0, true), PAYMENT_EV_NONE);
 	zassert_equal(payment_active(), 0);
 	zassert_equal(w.tx_count, 0);
 }
@@ -422,23 +426,23 @@ ZTEST(payment, test_partial_frame_expires)
 	result(reply, sizeof(reply), uuid, "PAID", "400");
 	w.rx = reply;
 	w.rx_budget = 10;
-	zassert_equal(payment_poll(T0 + 100), PAYMENT_EV_NONE);
+	zassert_equal(payment_poll(T0 + 100, true), PAYMENT_EV_NONE);
 	w.rx_budget = 0;
-	zassert_equal(payment_poll(T0 + 100 + 1000), PAYMENT_EV_NONE);
+	zassert_equal(payment_poll(T0 + 100 + 1000, true), PAYMENT_EV_NONE);
 	payment_stats_get(&stats);
 	zassert_equal(stats.expired, 0, "1000 ms ainda está no prazo");
-	zassert_equal(payment_poll(T0 + 100 + 1001), PAYMENT_EV_NONE);
+	zassert_equal(payment_poll(T0 + 100 + 1001, true), PAYMENT_EV_NONE);
 	payment_stats_get(&stats);
 	zassert_equal(stats.expired, 1);
 
 	w.rx_budget = -1;
-	zassert_equal(payment_poll(T0 + 1200), PAYMENT_EV_NONE, "o resto vencido não autoriza");
+	zassert_equal(payment_poll(T0 + 1200, true), PAYMENT_EV_NONE, "o resto vencido não autoriza");
 	payment_stats_get(&stats);
 	zassert_equal(stats.dropped, 1);
 	zassert_equal(payment_active(), 1);
 
 	w.rx = result(reply, sizeof(reply), uuid, "PAID", "400");
-	zassert_equal(payment_poll(T0 + 1300), PAYMENT_EV_PAID, "o quadro seguinte ressincroniza");
+	zassert_equal(payment_poll(T0 + 1300, true), PAYMENT_EV_PAID, "o quadro seguinte ressincroniza");
 }
 
 ZTEST(payment, test_invalid_arguments_and_busy)
@@ -476,7 +480,7 @@ ZTEST(payment, test_resend_error_fails_and_cancels)
 
 	start(uuid);
 	w.write_fail = 2;
-	zassert_equal(payment_poll(T0 + PAYMENT_TIMEOUT_MS), PAYMENT_EV_FAILED);
+	zassert_equal(payment_poll(T0 + PAYMENT_TIMEOUT_MS, true), PAYMENT_EV_FAILED);
 	zassert_equal(payment_active(), 0);
 	zassert_equal(hw_uart_write_fake.call_count, 3, "reenvio falhou, depois o CANCEL");
 	payment_stats_get(&stats);
@@ -491,4 +495,48 @@ ZTEST(payment, test_abort_error_returns_to_caller)
 	w.write_fail = 2;
 	zassert_equal(payment_abort(), -EIO);
 	zassert_equal(payment_active(), 0, "invalidado mesmo se o CANCEL falha");
+}
+
+ZTEST(payment, test_paid_waits_for_fresh_distance)
+{
+	char uuid[PAYMENT_UUID_LEN + 1];
+	char frame[128];
+
+	start(uuid);
+	w.rx = result(frame, sizeof(frame), uuid, "PAID", "400");
+	zassert_equal(payment_poll(T0 + 100, false), PAYMENT_EV_NONE);
+	zassert_equal(payment_active(), 1);
+	zassert_equal(payment_poll(T0 + 101, true), PAYMENT_EV_PAID);
+	zassert_equal(payment_active(), 0);
+	zassert_equal(w.tx_count, 1);
+}
+
+ZTEST(payment, test_buffered_paid_cannot_win_after_final_deadline)
+{
+	char uuid[PAYMENT_UUID_LEN + 1];
+	char frame[128];
+
+	start(uuid);
+	zassert_equal(payment_poll(T0 + PAYMENT_TIMEOUT_MS, true), PAYMENT_EV_NONE);
+	zassert_equal(payment_poll(T0 + 2 * PAYMENT_TIMEOUT_MS, true), PAYMENT_EV_NONE);
+	w.rx = result(frame, sizeof(frame), uuid, "PAID", "400");
+	zassert_equal(payment_poll(T0 + 3 * PAYMENT_TIMEOUT_MS + 1, true), PAYMENT_EV_FAILED);
+	zassert_equal(payment_poll(T0 + 3 * PAYMENT_TIMEOUT_MS + 2, true), PAYMENT_EV_NONE);
+	zassert_equal(payment_active(), 0);
+	zassert_equal(w.tx_count, PAYMENT_MAX_SENDS + 1);
+}
+
+ZTEST(payment, test_retained_paid_can_be_cancelled)
+{
+	char uuid[PAYMENT_UUID_LEN + 1];
+	char frame[128];
+
+	start(uuid);
+	w.rx = result(frame, sizeof(frame), uuid, "PAID", "400");
+	zassert_equal(payment_poll(T0 + 100, false), PAYMENT_EV_NONE);
+	zassert_ok(payment_abort());
+	zassert_equal(payment_poll(T0 + 101, true), PAYMENT_EV_NONE);
+	zassert_equal(payment_active(), 0);
+	zassert_equal(w.tx_count, 2);
+	zassert_ok(strncmp(w.tx[1], "P1 CANCEL ", 10));
 }

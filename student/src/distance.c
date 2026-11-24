@@ -11,7 +11,7 @@
 /** @brief Última amostra de uma faixa. */
 struct sample {
 	uint16_t raw;  /**< Código de 12 bits. */
-	int64_t at_ms; /**< Quando a conversão foi observada. */
+	int64_t at_ms; /**< Quando a conversão foi submetida. */
 	bool valid;    /**< Já houve alguma amostra. */
 };
 
@@ -47,7 +47,7 @@ void distance_service(int64_t now_ms)
 			adc.faulted = true;
 			return;
 		}
-		adc.samples[adc.lane] = (struct sample){.raw = raw, .at_ms = now_ms, .valid = true};
+		adc.samples[adc.lane] = (struct sample){.raw = raw, .at_ms = adc.started_ms, .valid = true};
 		adc.lane = adc.lane == HW_LANE_ENTRY ? HW_LANE_EXIT : HW_LANE_ENTRY;
 	}
 	if (hw_adc_start(adc.lane) < 0) {

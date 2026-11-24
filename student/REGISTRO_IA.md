@@ -17,8 +17,19 @@ entradas. Quem não usou IA escreve isso aqui.
 |---|---|---|---|
 | Erick de Lima Mascarenhas | Claude Code | Claude Opus 5.5 (`claude-opus-5-5`) | 2026-11-18 em diante |
 | João Victor Cavalcante da Silva Correia | Claude Code (extensão do VS Code) | Claude Opus 5.5 (`claude-opus-5-5`) | 2026-11-20 em diante |
+| Erick de Lima Mascarenhas | OpenAI Codex | GPT-6 | 2026-11-24 |
 
 ## Tarefas
+
+### 2026-11-24 — Revisão de segurança e correções antes da entrega
+
+- **Aluno:** Erick de Lima Mascarenhas
+- **Requisito(s):** REQ-01 a REQ-03, REQ-05 a REQ-12.
+- **O que pedi:** revisar o firmware contra o contrato do laboratório e corrigir localmente os problemas reproduzidos na revisão, antes da entrega.
+- **O que a IA propôs:** verificar os fins de curso em todos os estados que dependem deles, dar precedência aos prazos vencidos, confirmar a chegada perto do limiar, conferir o feixe imediatamente antes de iniciar o fechamento e comandar as saídas seguras de forma independente. No P1, verificar a partida do carro antes de consumir o resultado e aguardar distância recente antes de permitir que um PAID abra a cancela. No display, aguardar as duas conclusões de SPI sem bloquear as faixas.
+- **O que aceitei, mudei ou rejeitei, e por quê:** a pedido do aluno, o Codex aplicou as correções com mudanças restritas a `student/`. Os modelos e cenários públicos da disciplina permaneceram iguais.
+- **Como a IA verificou:** recompilação, análise estática do SDK e cenários locais com o Renode. A revisão do aluno antes da entrega é independente desses resultados.
+- **O que ficou para explicar na sabatina:** ordem entre o SPI e o CHARGE, retenção de um PAID durante amostra vencida, instantes dos prazos e limites do filtro perto de 1000 mm.
 
 Uma entrada por tarefa relevante (um requisito, um bug, uma refatoração).
 

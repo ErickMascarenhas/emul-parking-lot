@@ -172,6 +172,9 @@ static k_tid_t display_tid;
 /** @brief Bit 0 aceso: um pedido falhou e o display não aceita mais pedidos. */
 static atomic_t display_failed;
 
+/** @brief Pedidos enfileirados ou em execução pela thread do painel. */
+static atomic_t display_pending;
+
 /** @brief Uma linha de pixels, reaproveitada por todas as linhas de texto. */
 static uint8_t row_buf[ROW_BYTES];
 
@@ -388,16 +391,24 @@ int display_handle(const struct display_request *req)
  */
 static void display_thread(void *p1, void *p2, void *p3)
 {
-	struct display_request req = {.op = DISPLAY_OP_INIT};
+	const struct display_request init = {.op = DISPLAY_OP_INIT};
+	struct display_request req;
 
 	ARG_UNUSED(p1);
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
-	do {
+	if (display_handle(&init) < 0) {
+		atomic_set_bit(&display_failed, 0);
+	}
+	while (true) {
+		if (k_msgq_get(&display_queue, &req, K_FOREVER) != 0) {
+			continue;
+		}
 		if (display_handle(&req) < 0) {
 			atomic_set_bit(&display_failed, 0);
 		}
-	} while (k_msgq_get(&display_queue, &req, K_FOREVER) == 0);
+		atomic_dec(&display_pending);
+	}
 }
 
 /**
@@ -411,7 +422,13 @@ static int enqueue(const struct display_request *req)
 	if (atomic_test_bit(&display_failed, 0)) {
 		return -EIO;
 	}
-	return k_msgq_put(&display_queue, req, K_NO_WAIT) == 0 ? 0 : -ENOMEM;
+	/* A thread pode receber o pedido imediatamente ao inserir na fila. */
+	atomic_inc(&display_pending);
+	if (k_msgq_put(&display_queue, req, K_NO_WAIT) != 0) {
+		atomic_dec(&display_pending);
+		return -ENOMEM;
+	}
+	return 0;
 }
 
 int display_init(void)
@@ -445,6 +462,14 @@ int display_show_charge(uint32_t amount)
 		return -EINVAL;
 	}
 	return enqueue(&req);
+}
+
+int display_status(void)
+{
+	if (atomic_get(&display_pending) != 0) {
+		return -EAGAIN;
+	}
+	return atomic_test_bit(&display_failed, 0) ? -EIO : 0;
 }
 
 int display_clear(void)

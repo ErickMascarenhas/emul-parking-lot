@@ -442,6 +442,7 @@ ZTEST(display, test_thread_lifecycle)
 	}
 	zassert_true(queued > 0);
 	zassert_equal(display_clear(), -ENOMEM, "fila cheia");
+	zassert_equal(display_status(), -EAGAIN);
 
 	zassert_ok(display_init());
 	zassert_equal(display_init(), -EALREADY);
@@ -452,13 +453,16 @@ ZTEST(display, test_thread_lifecycle)
 	k_msleep(1000);
 	zassert_equal(hw_display_reset_fake.call_count, 2);
 	zassert_mem_equal(panel.cmds, ((const uint8_t[]){0x01, 0x11, 0x3a, 0x36, 0x29}), 5);
+	zassert_ok(display_status());
 	zassert_equal(panel.count, (size_t)queued * 4, "os pedidos da fila foram atendidos");
 
 	memset(&panel, 0, sizeof(panel));
 	zassert_ok(display_show_plate("ABC1D23"));
 	zassert_ok(display_show_charge(400));
 	zassert_equal(panel.count, 0, "as funções só enfileiram");
+	zassert_equal(display_status(), -EAGAIN);
 	k_msleep(200);
+	zassert_ok(display_status());
 	zassert_equal(panel.count, 7);
 	check_window(0, "ABC1D23");
 	check_window(4, "BRL 4.00");
@@ -469,6 +473,7 @@ ZTEST(display, test_thread_lifecycle)
 	hw_display_cmd_fake.return_val = -EIO;
 	zassert_ok(display_clear());
 	k_msleep(50);
+	zassert_equal(display_status(), -EIO);
 	zassert_equal(display_clear(), -EIO, "display falho recusa pedidos");
 	zassert_equal(display_show_plate("ABC1D23"), -EIO);
 	zassert_equal(display_show_charge(400), -EIO);

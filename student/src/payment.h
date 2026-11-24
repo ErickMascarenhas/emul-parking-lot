@@ -5,13 +5,14 @@
  * Uma tentativa de saída tem um UUID novo e um valor congelado. A cobrança é
  * enviada no máximo PAYMENT_MAX_SENDS vezes, com o mesmo UUID e valor, a cada
  * PAYMENT_TIMEOUT_MS sem resposta. Só um PAID com o UUID atual, o mesmo valor e
- * BRL confirma o pagamento. Tudo roda na thread da máquina de estados: os
- * bytes recebidos são lidos com hw_uart_read() dentro de payment_poll().
+ * BRL confirma o pagamento. O controle da faixa chama payment_poll() sob
+ * o mutex de atendimento. A leitura da UART é feita com hw_uart_read().
  */
 
 #ifndef PAYMENT_H_
 #define PAYMENT_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /** @brief Máximo de envios da mesma cobrança, o primeiro incluído. */
@@ -63,10 +64,12 @@ int payment_start(const char *plate, uint32_t amount, int64_t now_ms);
  * outro valor ou sem cobrança ativa são descartadas sem efeito.
  *
  * @param now_ms Tempo virtual atual.
+ * @param authorize true se a distância atual permite usar um PAID. Enquanto
+ *        false, o PAID válido fica retido e a cobrança ainda pode ser cancelada.
  * @return Desfecho novo da cobrança, se houver. Depois de PAID ou FAILED a
  *         cobrança deixa de estar ativa.
  */
-enum payment_event payment_poll(int64_t now_ms);
+enum payment_event payment_poll(int64_t now_ms, bool authorize);
 
 /**
  * @brief Desiste da cobrança ativa (carro saiu, assistência, reset).
@@ -89,7 +92,7 @@ int payment_active(void);
 struct payment_stats {
 	unsigned int dropped;         /**< Quadros descartados no LF (longos, com CR, inválidos). */
 	unsigned int expired;         /**< Quadros parciais que passaram do prazo de montagem. */
-	unsigned int cancel_failures; /**< CANCEL que a UART não enviou após esgotar os envios. */
+	unsigned int cancel_failures; /**< CANCEL que a UART não conseguiu enviar. */
 };
 
 /**

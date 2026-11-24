@@ -28,11 +28,12 @@ FAKE_VALUE_FUNC(int, hw_uart_read, enum hw_uart, uint8_t *);
 FAKE_VALUE_FUNC(int, hw_uart_write, enum hw_uart, const uint8_t *, size_t);
 FAKE_VALUE_FUNC(int, distance_get, enum hw_lane, int64_t, uint16_t *);
 FAKE_VALUE_FUNC(bool, distance_faulted);
-FAKE_VALUE_FUNC(enum payment_event, payment_poll, int64_t);
+FAKE_VALUE_FUNC(enum payment_event, payment_poll, int64_t, bool);
 FAKE_VALUE_FUNC(int, payment_start, const char *, uint32_t, int64_t);
 FAKE_VALUE_FUNC(int, payment_abort);
 FAKE_VALUE_FUNC(int, display_show_plate, const char *);
 FAKE_VALUE_FUNC(int, display_show_charge, uint32_t);
+FAKE_VALUE_FUNC(int, display_status);
 FAKE_VALUE_FUNC(int, tariff_compute, int64_t, uint32_t, uint32_t *);
 
 #define PLATE "ABC1D23"
@@ -46,6 +47,7 @@ static struct {
 	bool out[HW_LANE_COUNT][HW_OUT_COUNT];
 	int in[HW_LANE_COUNT][HW_IN_COUNT];
 	int in_err[HW_IN_COUNT];
+	bool beam_when_green_off; /**< Ativa o feixe ao apagar o verde. */
 	int fail_output; /**< Saída cuja escrita falha, ou -1. */
 	unsigned int buzzes[HW_LANE_COUNT];
 	unsigned int enables[HW_LANE_COUNT];
@@ -66,6 +68,9 @@ static int fake_output_set(enum hw_lane lane, enum hw_output output, bool on)
 	}
 	if (output == HW_OUT_MOTOR_ENABLE && on) {
 		w.enables[lane]++;
+	}
+	if (output == HW_OUT_GREEN && !on && w.beam_when_green_off) {
+		w.in[lane][HW_IN_BEAM] = 1;
 	}
 	w.out[lane][output] = on;
 	return 0;
@@ -131,6 +136,7 @@ static void reset_world(void *fixture)
 	RESET_FAKE(payment_abort);
 	RESET_FAKE(display_show_plate);
 	RESET_FAKE(display_show_charge);
+	RESET_FAKE(display_status);
 	RESET_FAKE(tariff_compute);
 	FFF_RESET_HISTORY();
 	hw_output_set_fake.custom_fake = fake_output_set;
@@ -539,8 +545,8 @@ ZTEST(lane, test_exit_without_session_assists_without_charging)
 	zassert_equal(display_show_plate_fake.call_count, 0);
 }
 
-/** @brief Leva a saída de um veículo estacionado até a cobrança enviada. */
-static void to_paying(void)
+/** @brief Começa a preparar a cobrança de um veículo estacionado. */
+static void start_display(void)
 {
 	memset(w.tx, 0, sizeof(w.tx));
 	zassert_ok(session_add(PLATE, w.now));
@@ -548,6 +554,14 @@ static void to_paying(void)
 	arrive(HW_LANE_EXIT);
 	FFF_RESET_HISTORY();
 	reply(HW_LANE_EXIT, "+PLATE:1,\"" PLATE "\",93\r\n");
+}
+
+/** @brief Entrega ao controle as duas conclusões do display falso. */
+static void to_paying(void)
+{
+	start_display();
+	step(HW_LANE_EXIT);
+	step(HW_LANE_EXIT);
 }
 
 /** @brief Posição da primeira chamada a um falso no histórico do FFF, ou -1. */
@@ -563,14 +577,27 @@ static int called_at(void *fake)
 
 ZTEST(lane, test_exit_freezes_charge_between_plate_and_amount)
 {
-	to_paying();
+	start_display();
+	zassert_equal(state(HW_LANE_EXIT), LANE_SHOWING_PLATE);
+	display_status_fake.return_val = -EAGAIN;
+	run(HW_LANE_EXIT, 25);
+	zassert_equal(tariff_compute_fake.call_count, 0);
+	zassert_equal(display_show_charge_fake.call_count, 0);
+	display_status_fake.return_val = 0;
+	step(HW_LANE_EXIT);
+	zassert_equal(state(HW_LANE_EXIT), LANE_SHOWING_CHARGE);
+	display_status_fake.return_val = -EAGAIN;
+	run(HW_LANE_EXIT, 25);
+	zassert_equal(payment_start_fake.call_count, 0);
+	display_status_fake.return_val = 0;
+	step(HW_LANE_EXIT);
 	zassert_equal(state(HW_LANE_EXIT), LANE_PAYING);
-	zassert_true(called_at((void *)display_show_plate) >= 0);
-	zassert_true(called_at((void *)display_show_plate) < called_at((void *)tariff_compute));
-	zassert_true(called_at((void *)tariff_compute) < called_at((void *)display_show_charge));
-	zassert_true(called_at((void *)display_show_charge) < called_at((void *)payment_start));
+	zassert_equal(display_show_plate_fake.call_count, 1);
+	zassert_equal(tariff_compute_fake.call_count, 1);
+	zassert_equal(display_show_charge_fake.call_count, 1);
+	zassert_equal(payment_start_fake.call_count, 1);
 	zassert_str_equal(display_show_plate_fake.arg0_val, PLATE);
-	zassert_equal(tariff_compute_fake.arg0_val, LANE_SETTLE_MS);
+	zassert_equal(tariff_compute_fake.arg0_val, LANE_SETTLE_MS + 25);
 	zassert_equal(tariff_compute_fake.arg1_val, CONFIG_PARKING_TARIFF_UNIT_MS);
 	zassert_equal(display_show_charge_fake.arg0_val, AMOUNT);
 	zassert_str_equal(payment_start_fake.arg0_val, PLATE);
@@ -778,4 +805,162 @@ ZTEST(lane, test_lane_fail_latches_and_cancels_payment)
 	lane_fail(HW_LANE_EXIT, w.now);
 	assert_assistance(HW_LANE_EXIT, LANE_FAULT);
 	zassert_equal(payment_abort_fake.call_count, 1);
+}
+
+ZTEST(lane, test_boot_latches_transient_contradiction)
+{
+	lane_init(HW_LANE_ENTRY, w.now);
+	w.in[HW_LANE_ENTRY][HW_IN_LIMIT_UPPER] = 1;
+	step(HW_LANE_ENTRY);
+	w.in[HW_LANE_ENTRY][HW_IN_LIMIT_UPPER] = 0;
+	w.dist[HW_LANE_ENTRY] = NEAR;
+	run(HW_LANE_ENTRY, LANE_SETTLE_MS + 1);
+	assert_assistance(HW_LANE_ENTRY, LANE_FAULT);
+	zassert_equal(w.enables[HW_LANE_ENTRY], 0);
+}
+
+ZTEST(lane, test_lost_lower_limit_during_capture_prevents_opening)
+{
+	boot(HW_LANE_ENTRY);
+	arrive(HW_LANE_ENTRY);
+	w.in[HW_LANE_ENTRY][HW_IN_LIMIT_LOWER] = 0;
+	reply(HW_LANE_ENTRY, "+PLATE:1,\"" PLATE "\",93\r\n");
+	assert_assistance(HW_LANE_ENTRY, LANE_FAULT);
+	zassert_equal(w.enables[HW_LANE_ENTRY], 0);
+}
+
+ZTEST(lane, test_lost_upper_limit_turns_green_off)
+{
+	to_opening();
+	reach_upper(HW_LANE_ENTRY);
+	w.in[HW_LANE_ENTRY][HW_IN_LIMIT_UPPER] = 0;
+	step(HW_LANE_ENTRY);
+	assert_assistance(HW_LANE_ENTRY, LANE_FAULT);
+}
+
+ZTEST(lane, test_one_noisy_read_does_not_start_capture)
+{
+	boot(HW_LANE_ENTRY);
+	w.dist[HW_LANE_ENTRY] = 668;
+	step(HW_LANE_ENTRY);
+	w.dist[HW_LANE_ENTRY] = 716;
+	run(HW_LANE_ENTRY, 200);
+	zassert_equal(state(HW_LANE_ENTRY), LANE_IDLE);
+	zassert_str_equal(w.tx[HW_UART_CAMERA_ENTRY], "");
+	w.dist[HW_LANE_ENTRY] = DISTANCE_ARRIVAL_CODE - 1;
+	run(HW_LANE_ENTRY, 340);
+	zassert_equal(state(HW_LANE_ENTRY), LANE_IDENTIFYING);
+}
+
+ZTEST(lane, test_late_plate_starts_next_capture_without_opening)
+{
+	boot(HW_LANE_ENTRY);
+	arrive(HW_LANE_ENTRY);
+	w.now += LANE_CAPTURE_TIMEOUT_MS + 1;
+	reply(HW_LANE_ENTRY, "+PLATE:1,\"" PLATE "\",93\r\n");
+	zassert_equal(state(HW_LANE_ENTRY), LANE_IDENTIFYING);
+	zassert_equal(w.enables[HW_LANE_ENTRY], 0);
+	zassert_str_equal(w.tx[HW_UART_CAMERA_ENTRY], "AT+CAPTURE=1\r\nAT+CAPTURE=2\r\n");
+}
+
+ZTEST(lane, test_late_upper_limit_never_gives_green)
+{
+	to_opening();
+	w.in[HW_LANE_ENTRY][HW_IN_LIMIT_LOWER] = 0;
+	w.in[HW_LANE_ENTRY][HW_IN_LIMIT_UPPER] = 1;
+	w.now += LANE_MOTOR_BUDGET_MS + 1;
+	step(HW_LANE_ENTRY);
+	assert_assistance(HW_LANE_ENTRY, LANE_FAULT);
+}
+
+ZTEST(lane, test_late_passage_never_creates_session)
+{
+	to_opening();
+	reach_upper(HW_LANE_ENTRY);
+	w.in[HW_LANE_ENTRY][HW_IN_BEAM] = 1;
+	step(HW_LANE_ENTRY);
+	w.now += LANE_PASSAGE_BUDGET_MS + 1;
+	w.in[HW_LANE_ENTRY][HW_IN_BEAM] = 0;
+	w.dist[HW_LANE_ENTRY] = FAR;
+	step(HW_LANE_ENTRY);
+	assert_assistance(HW_LANE_ENTRY, LANE_FAULT);
+	zassert_equal(session_find(PLATE, NULL), -ENOENT);
+}
+
+ZTEST(lane, test_beam_is_rechecked_before_energizing_close)
+{
+	to_opening();
+	reach_upper(HW_LANE_ENTRY);
+	w.in[HW_LANE_ENTRY][HW_IN_BEAM] = 1;
+	step(HW_LANE_ENTRY);
+	w.in[HW_LANE_ENTRY][HW_IN_BEAM] = 0;
+	w.dist[HW_LANE_ENTRY] = FAR;
+	w.beam_when_green_off = true;
+	step(HW_LANE_ENTRY);
+	assert_assistance(HW_LANE_ENTRY, LANE_FAULT);
+	zassert_equal(w.enables[HW_LANE_ENTRY], 1, "só houve acionamento para abrir");
+}
+
+ZTEST(lane, test_display_timeout_prevents_charging)
+{
+	start_display();
+	display_status_fake.return_val = -EAGAIN;
+	run(HW_LANE_EXIT, 1100);
+	assert_assistance(HW_LANE_EXIT, LANE_ASSIST);
+	zassert_equal(payment_start_fake.call_count, 0);
+}
+
+ZTEST(lane, test_stale_distance_does_not_authorize_paid)
+{
+	to_paying();
+	w.dist_err = -ENODATA;
+	step(HW_LANE_EXIT);
+	zassert_false(payment_poll_fake.arg1_val);
+	zassert_false(w.out[HW_LANE_EXIT][HW_OUT_MOTOR_ENABLE]);
+	w.dist_err = 0;
+	payment_poll_fake.return_val = PAYMENT_EV_PAID;
+	unsigned int next_poll = payment_poll_fake.call_count;
+
+	step(HW_LANE_EXIT);
+	zassert_true(payment_poll_fake.arg1_history[next_poll]);
+	zassert_equal(state(HW_LANE_EXIT), LANE_OPENING);
+}
+
+ZTEST(lane, test_departure_wins_over_a_buffered_paid)
+{
+	to_paying();
+	w.dist[HW_LANE_EXIT] = FAR;
+	payment_poll_fake.return_val = PAYMENT_EV_PAID;
+	FFF_RESET_HISTORY();
+	step(HW_LANE_EXIT);
+	assert_assistance(HW_LANE_EXIT, LANE_ASSIST);
+	zassert_false(payment_poll_fake.arg1_val);
+	zassert_true(called_at((void *)payment_abort) < called_at((void *)payment_poll));
+}
+
+ZTEST(lane, test_display_failure_prevents_charging)
+{
+	start_display();
+	display_status_fake.return_val = -EIO;
+	step(HW_LANE_EXIT);
+	assert_assistance(HW_LANE_EXIT, LANE_ASSIST);
+	zassert_equal(payment_start_fake.call_count, 0);
+}
+
+ZTEST(lane, test_departure_while_drawing_prevents_charging)
+{
+	start_display();
+	w.dist[HW_LANE_EXIT] = FAR;
+	step(HW_LANE_EXIT);
+	assert_assistance(HW_LANE_EXIT, LANE_ASSIST);
+	zassert_equal(payment_start_fake.call_count, 0);
+}
+
+ZTEST(lane, test_failed_motor_write_does_not_skip_safe_lights)
+{
+	to_opening();
+	reach_upper(HW_LANE_ENTRY);
+	w.fail_output = HW_OUT_MOTOR_ENABLE;
+	lane_fail(HW_LANE_ENTRY, w.now);
+	assert_assistance(HW_LANE_ENTRY, LANE_FAULT);
 }

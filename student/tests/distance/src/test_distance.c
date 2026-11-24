@@ -77,8 +77,8 @@ ZTEST(distance, test_old_sample_is_not_fresh)
 
 	distance_service(0);
 	distance_service(1);
-	zassert_ok(distance_get(HW_LANE_ENTRY, 1 + DISTANCE_FRESH_MS, &raw));
-	zassert_equal(distance_get(HW_LANE_ENTRY, 2 + DISTANCE_FRESH_MS, &raw), -ENODATA);
+	zassert_ok(distance_get(HW_LANE_ENTRY, DISTANCE_FRESH_MS, &raw));
+	zassert_equal(distance_get(HW_LANE_ENTRY, 1 + DISTANCE_FRESH_MS, &raw), -ENODATA);
 }
 
 ZTEST(distance, test_missed_deadline_latches_fault)

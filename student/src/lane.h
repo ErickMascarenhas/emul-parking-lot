@@ -20,6 +20,8 @@ enum lane_state {
 	LANE_BOOT = 0,    /**< Esperando a primeira amostra dos sensores. */
 	LANE_IDLE,        /**< Fechada, esperando veículo. */
 	LANE_IDENTIFYING, /**< Tentativas de captura da placa. */
+	LANE_SHOWING_PLATE, /**< Saída: esperando o desenho da placa. */
+	LANE_SHOWING_CHARGE, /**< Saída: esperando o valor e os avisos no painel. */
 	LANE_PAYING,      /**< Saída: aguardando o PAID da cobrança. */
 	LANE_OPENING,     /**< Motor abrindo. */
 	LANE_OPEN,        /**< Aberta, esperando o feixe ser interrompido. */

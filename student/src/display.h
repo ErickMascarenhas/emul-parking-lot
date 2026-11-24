@@ -93,6 +93,14 @@ int display_show_plate(const char *plate);
 int display_show_charge(uint32_t amount);
 
 /**
+ * @brief Consulta a conclusão dos pedidos de desenho, sem esperar.
+ *
+ * @return 0 quando todos terminaram, -EAGAIN com pedidos em execução ou na
+ *         fila, ou -EIO se houve falha no painel.
+ */
+int display_status(void);
+
+/**
  * @brief Apaga a tela.
  *
  * @return 0 se o pedido foi enfileirado, -ENOMEM com a fila cheia ou -EIO se

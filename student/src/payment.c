@@ -24,7 +24,8 @@
 /** @brief Estado da cobrança. */
 struct payment {
 	struct line_framer rx;             /**< Montador dos quadros recebidos (só LF). */
-	bool active;                       /**< Há cobrança esperando resultado. */
+	bool active;                       /**< Cobrança aguardando resultado ou liberação da faixa. */
+	bool paid_received;                 /**< PAID atual, esperando autorização da faixa. */
 	unsigned int sends;                /**< Envios do CHARGE atual. */
 	int64_t sent_ms;                   /**< Instante do último envio. */
 	struct payment_stats stats;        /**< Contadores de diagnóstico. */
@@ -100,11 +101,13 @@ static int send_charge(int64_t now_ms)
 static enum payment_event classify(const char *frame)
 {
 	if (strcmp(frame, pay.paid) == 0) {
-		pay.active = false;
+		pay.paid_received = true;
 		return PAYMENT_EV_PAID;
 	}
 	if (strcmp(frame, pay.cancelled) == 0) {
-		pay.active = false;
+		if (payment_abort() < 0) {
+			pay.stats.cancel_failures++;
+		}
 		return PAYMENT_EV_FAILED;
 	}
 	return PAYMENT_EV_NONE;
@@ -184,6 +187,7 @@ int payment_start(const char *plate, uint32_t amount, int64_t now_ms)
 		return -ENOSPC;
 	}
 	pay.sends = 0U;
+	pay.paid_received = false;
 	err = send_charge(now_ms);
 	if (err < 0) {
 		return err;
@@ -192,21 +196,42 @@ int payment_start(const char *plate, uint32_t amount, int64_t now_ms)
 	return 0;
 }
 
-enum payment_event payment_poll(int64_t now_ms)
+/** @brief Entrega PAID uma vez, assim que a faixa puder usá-lo. */
+static enum payment_event authorize_paid(bool authorize)
+{
+	if (!authorize) {
+		return PAYMENT_EV_NONE;
+	}
+	pay.active = false;
+	return PAYMENT_EV_PAID;
+}
+
+enum payment_event payment_poll(int64_t now_ms, bool authorize)
 {
 	enum payment_event event;
 	uint8_t byte;
+	size_t remaining = LINE_MAX_FRAME;
 
+	if (pay.active && pay.paid_received) {
+		return authorize_paid(authorize);
+	}
+	event = check_deadline(now_ms);
+	if (event == PAYMENT_EV_FAILED) {
+		return event;
+	}
 	if (line_expire(&pay.rx, now_ms)) {
 		pay.stats.expired++;
 	}
-	while (hw_uart_read(HW_UART_PAYMENT, &byte) == 0) {
+	while (remaining-- > 0 && hw_uart_read(HW_UART_PAYMENT, &byte) == 0) {
 		event = receive(byte, now_ms);
-		if (event != PAYMENT_EV_NONE) {
+		if (event == PAYMENT_EV_PAID) {
+			return authorize_paid(authorize);
+		}
+		if (event == PAYMENT_EV_FAILED) {
 			return event;
 		}
 	}
-	return check_deadline(now_ms);
+	return PAYMENT_EV_NONE;
 }
 
 int payment_abort(void)

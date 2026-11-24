@@ -2,9 +2,9 @@
  * @file main.c
  * @brief Inicialização e laço de atendimento das duas faixas.
  *
- * O laço roda a cada 1 ms de tempo virtual e nunca bloqueia. As bordas dos fins
- * de curso e dos feixes chegam pela work queue do sistema e atendem a faixa na
- * hora; o mutex impede que work queue e laço mexam na mesma faixa ao mesmo tempo.
+ * O laço atende as duas faixas sem esperar conversão do ADC ou desenho do
+ * display. A work queue atende as bordas dos fins de curso e dos feixes.
+ * O mutex serializa o atendimento do laço e o da work queue.
  */
 
 #include <zephyr/kernel.h>

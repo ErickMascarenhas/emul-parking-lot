@@ -39,6 +39,7 @@
 struct input_line {
 	struct gpio_dt_spec spec; /**< Pino. */
 	struct gpio_callback cb;  /**< Registro no driver de GPIO. */
+	size_t pending_bit;       /**< Índice da entrada no mapa de bordas. */
 };
 
 static const struct gpio_dt_spec outputs[HW_LANE_COUNT][HW_OUT_COUNT] = {
@@ -105,7 +106,7 @@ static void input_isr(const struct device *port, struct gpio_callback *cb, gpio_
 
 	ARG_UNUSED(port);
 	ARG_UNUSED(pins);
-	atomic_set_bit(input_pending, line - &inputs[0][0]);
+	atomic_set_bit(input_pending, line->pending_bit);
 	k_work_submit(&input_work);
 }
 
@@ -152,6 +153,7 @@ int hw_init(void)
 			err = first_error(err, output_setup(&outputs[lane][out], out == HW_OUT_RED));
 		}
 		for (size_t in = 0; in < HW_IN_COUNT; in++) {
+			inputs[lane][in].pending_bit = lane * HW_IN_COUNT + in;
 			err = first_error(err, input_setup(&inputs[lane][in]));
 		}
 		err = first_error(err, ready(uarts[lane]));
